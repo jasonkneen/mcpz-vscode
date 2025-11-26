@@ -7,10 +7,12 @@ import { Client as MCPClient } from '@modelcontextprotocol/sdk/client/index';
  * Server types supported by the extension
  */
 export enum ServerType {
-    /** Command-line process server */
+    /** Command-line process server using stdio transport */
     PROCESS = 'process',
-    /** Server-Sent Events (SSE) server */
-    SSE = 'sse'
+    /** Server-Sent Events (SSE) server - legacy HTTP transport */
+    SSE = 'sse',
+    /** Streamable HTTP transport - modern HTTP-based MCP transport */
+    STREAMABLE_HTTP = 'streamable-http'
 }
 
 /**

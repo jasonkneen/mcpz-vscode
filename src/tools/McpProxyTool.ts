@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
-import { Client as MCPClient } from "@modelcontextprotocol/sdk/client/index";
-import { CallToolRequest, Tool } from "@modelcontextprotocol/sdk/types";
+import { Client as MCPClient } from "@modelcontextprotocol/sdk/client/index.js";
+import { CallToolRequest, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { Logger } from '../utils/Logger';
 
 /**
- * A proxy tool that forwards calls to an MCP tool
+ * A proxy tool that forwards calls to an MCP tool.
+ * Implements the VSCode LanguageModelChatTool interface to bridge
+ * MCP tools with VSCode's language model API.
  */
 export class McpProxyTool implements vscode.LanguageModelChatTool {
     private _client: MCPClient;
@@ -25,82 +27,93 @@ export class McpProxyTool implements vscode.LanguageModelChatTool {
         this.name = tool.name;
         this.inputSchema = tool.inputSchema;
         this.description = tool.description || '';
-        // Add tags to identify which server this tool belongs to
         this.tags = ['mcpsx', this._serverName];
         this.logger = Logger.getInstance();
 
-        this.logger.log(`[DEBUG] Created McpProxyTool for ${this.name} (server: ${this._serverName})`);
-        this.logger.log(`[DEBUG] Tool schema: ${JSON.stringify(this.inputSchema)}`);
-        
-        // Log the server and tool information for debugging
-        console.log(`[TOOL DEBUG] Registered tool ${this.name} for server ${this._serverName}`);
-        console.log(`[TOOL DEBUG] Tool tags: ${this.tags.join(', ')}`);
-    }
-
-    private _handleNotification(notification: any): Promise<void> {
-        this.logger.log(`[DEBUG] Received notification: ${JSON.stringify(notification)}`);
-        return Promise.resolve();
+        this.logger.log(`Created McpProxyTool: ${this.name} (server: ${this._serverName})`);
     }
 
     async prepareInvocation(options: vscode.LanguageModelToolInvocationOptions<any>): Promise<{ confirmationMessage?: string; invocationMessage?: string }> {
-        this.logger.log(`[DEBUG] Preparing invocation for tool ${this.name}`);
-        this.logger.log(`[DEBUG] Invocation options: ${JSON.stringify(options)}`);
-        this.logger.log(`[DEBUG] Tool server: ${this._serverName}`);
-
         return {
-            confirmationMessage: `Allow tool "${this._tool.name}" to run?`,
-            invocationMessage: `Running tool "${this._tool.name}"...`
+            confirmationMessage: `Allow tool "${this._tool.name}" from server "${this._serverName}" to run?`,
+            invocationMessage: `Running "${this._tool.name}" on ${this._serverName}...`
         };
     }
 
     async invoke(options: vscode.LanguageModelToolInvocationOptions<any>, token: vscode.CancellationToken): Promise<vscode.LanguageModelToolResult> {
-        this.logger.log(`[DEBUG] Invoking tool: ${this.name}`);
-        this.logger.log(`[DEBUG] Server: ${this._serverName}`);
-        this.logger.log(`[DEBUG] Tool input: ${JSON.stringify(options.input)}`);
-        
+        this.logger.log(`Invoking tool: ${this.name} on server: ${this._serverName}`);
+
+        // Check for cancellation
+        if (token.isCancellationRequested) {
+            throw new Error(`Tool invocation cancelled: ${this._tool.name}`);
+        }
+
         // Process input to replace placeholders
         const processedInput = this._processInput(options.input);
-        
+
         try {
             const payload: CallToolRequest["params"] = {
                 name: this._tool.name,
                 arguments: processedInput
             };
-            
-            this.logger.log(`[DEBUG] Sending payload: ${JSON.stringify(payload)}`);
-            const result = await this._client.callTool(payload);
-            this.logger.log(`[DEBUG] Tool result: ${JSON.stringify(result)}`);
 
-            if (result.error) {
-                throw new Error(`Tool execution error: ${JSON.stringify(result.error)}`);
-            }
+            // Set up cancellation handler
+            const abortController = new AbortController();
+            const cancellationListener = token.onCancellationRequested(() => {
+                abortController.abort();
+            });
 
-            // Convert MCP result to LanguageModelToolResult
-            let content: (vscode.LanguageModelTextPart | vscode.LanguageModelPromptTsxPart)[] = [];
-            
-            if (Array.isArray(result.content)) {
-                for (const item of result.content) {
-                    if (item.type === 'text' && typeof item.text === 'string') {
-                        content.push(new vscode.LanguageModelTextPart(item.text));
-                    }
+            try {
+                const result = await this._client.callTool(payload);
+
+                if (result.error) {
+                    const errorDetails = typeof result.error === 'object'
+                        ? JSON.stringify(result.error)
+                        : String(result.error);
+                    throw new Error(`Tool execution error: ${errorDetails}`);
                 }
-            } else if (result.content) {
-                // Handle single content item
-                content.push(new vscode.LanguageModelTextPart(String(result.content)));
-            }
 
-            if (content.length === 0) {
-                content.push(new vscode.LanguageModelTextPart('Tool executed successfully but returned no content.'));
-            }
+                // Convert MCP result to LanguageModelToolResult
+                const content: (vscode.LanguageModelTextPart | vscode.LanguageModelPromptTsxPart)[] = [];
 
-            return new vscode.LanguageModelToolResult(content);
+                if (Array.isArray(result.content)) {
+                    for (const item of result.content) {
+                        if (item.type === 'text' && typeof item.text === 'string') {
+                            content.push(new vscode.LanguageModelTextPart(item.text));
+                        } else if (item.type === 'image' && 'data' in item) {
+                            // Handle image content by providing a text description
+                            content.push(new vscode.LanguageModelTextPart(`[Image content returned: ${(item as any).mimeType || 'image'}]`));
+                        }
+                    }
+                } else if (result.content) {
+                    content.push(new vscode.LanguageModelTextPart(String(result.content)));
+                }
+
+                if (content.length === 0) {
+                    content.push(new vscode.LanguageModelTextPart('Tool executed successfully but returned no content.'));
+                }
+
+                return new vscode.LanguageModelToolResult(content);
+            } finally {
+                cancellationListener.dispose();
+            }
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            this.logger.error(`Tool invocation error for ${this.name}: ${errorMessage}`);
-            if (error instanceof Error && error.stack) {
-                this.logger.debug(`Error stack: ${error.stack}`);
+
+            // Provide user-friendly error messages
+            let userMessage = `Tool "${this._tool.name}" failed`;
+            if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND')) {
+                userMessage = `Unable to connect to server "${this._serverName}". Please check if the server is running.`;
+            } else if (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT')) {
+                userMessage = `Request to "${this._serverName}" timed out. The server may be overloaded or unresponsive.`;
+            } else if (errorMessage.includes('cancelled') || errorMessage.includes('aborted')) {
+                userMessage = `Tool invocation was cancelled.`;
+            } else {
+                userMessage = `${userMessage}: ${errorMessage}`;
             }
-            throw new Error(`Tool "${this._tool.name}" failed: ${errorMessage}`);
+
+            this.logger.error(`Tool invocation error for ${this.name}: ${errorMessage}`);
+            throw new Error(userMessage);
         }
     }
     

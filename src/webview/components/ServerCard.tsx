@@ -1,19 +1,20 @@
 import React, { useState, useEffect } from "react";
-import { 
-  ChevronRight, 
-  Edit, 
-  Trash, 
-  Terminal, 
-  Globe, 
+import {
+  ChevronRight,
+  Edit,
+  Trash,
+  Terminal,
+  Globe,
   AlertCircle,
-  Info, 
+  Info,
   Copy,
   Plus,
   X,
   ListTree,
   Layers,
   ExternalLink,
-  Circle
+  Circle,
+  Zap
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -76,10 +77,9 @@ export const ServerCard = ({ className, server, onEdit, isExpanded, onOpenChange
   // Use external expansion state if provided
   useEffect(() => {
     if (isExpanded !== undefined) {
-      console.log(`[ServerCard] ${server.name}: External expansion state changed to ${isExpanded}`);
       setIsLocalExpanded(isExpanded);
     }
-  }, [isExpanded, server.name]);
+  }, [isExpanded]);
 
 
 
@@ -103,35 +103,31 @@ export const ServerCard = ({ className, server, onEdit, isExpanded, onOpenChange
   // No longer need the edit fields state management
 
   const handleToggleServer = (enabled: boolean) => {
-    console.log(`[TOGGLE DEBUG] Toggling server ${server.name} (${server.id}) to ${enabled ? 'enabled' : 'disabled'}, current state: enabled=${localEnabled}, isConnected=${server.isConnected}`);
-    
-    // Prevent double toggle or rapid toggling by checking if we're already toggling
+    // Prevent double toggle or rapid toggling
     if (isToggling) {
-      console.log(`[TOGGLE DEBUG] Ignoring toggle request - already toggling`);
       return;
     }
-    
-    // If we're already in the requested state, do nothing
+
+    // If already in the requested state, do nothing
     if (enabled === localEnabled && !isToggling) {
-      console.log(`[TOGGLE DEBUG] Server ${server.name} is already in the requested state (${enabled ? 'enabled' : 'disabled'})`);
       return;
     }
-    
+
     // Show toggling state
     setIsToggling(true);
-    
+
     // Update local state immediately for responsive UI
     setLocalEnabled(enabled);
-    
-    // Post message to VSCode extension - use ID if available
+
+    // Post message to VSCode extension
     window.vscodeApi.postMessage({
       type: 'toggleServer',
       id: server.id,
-      name: server.name, // Include name as fallback
+      name: server.name,
       enabled
     });
-    
-    // Display a loading toast when enabling server
+
+    // Display a loading notification when enabling server
     if (enabled) {
       window.vscodeApi.postMessage({
         type: 'showNotification',
@@ -139,18 +135,16 @@ export const ServerCard = ({ className, server, onEdit, isExpanded, onOpenChange
         isLoading: true
       });
     }
-    
-    // Reset toggling state after a timeout if server doesn't respond
+
+    // Reset toggling state after timeout if server doesn't respond
     setTimeout(() => {
       setIsToggling(false);
-      console.log(`[TOGGLE DEBUG] Reset toggling state after timeout for ${server.name}, current enabled=${localEnabled}`);
-    }, 8000); // Increase timeout to 8 seconds to allow more time for server to respond
+    }, 8000);
   };
   
-  // Reset toggling state when server.enabled changes (meaning toggle completed)
+  // Reset toggling state when server.enabled changes (toggle completed)
   useEffect(() => {
     if (isToggling) {
-      console.log(`[TOGGLE DEBUG] Server ${server.name} enabled state changed to ${server.enabled}, resetting toggling state, localEnabled=${localEnabled}`);
       setIsToggling(false);
     }
   }, [server.enabled]);
@@ -192,7 +186,7 @@ const serverType = server?.type || ServerType.PROCESS;
 // Apply sensible defaults to any missing properties
 const serverWithDefaults = {
   ...server,
-  id: server.id || 'unknown-id', // Default ID in case it's missing
+  id: server.id || 'unknown-id',
   name: server.name || 'Unknown Server',
   type: serverType,
   command: server.command || '',
@@ -202,45 +196,14 @@ const serverWithDefaults = {
   tools: Array.isArray(server.tools) ? [...server.tools] : [],
   resources: Array.isArray(server.resources) ? [...server.resources] : []
 };
-// Log server properties for debugging
-console.log('[CARD DEBUG] ServerCard received server data:', JSON.stringify({
-  id: serverWithDefaults.id,
-  name: serverWithDefaults.name,
-  type: serverWithDefaults.type,
-  enabled: serverWithDefaults.enabled,
-  toolsLength: serverWithDefaults.tools?.length || 0,
-  isToolsArray: Array.isArray(serverWithDefaults.tools),
-  toolsType: typeof serverWithDefaults.tools
-}, null, 2));
 
-if (serverWithDefaults.tools && serverWithDefaults.tools.length > 0) {
-  console.log('[CARD DEBUG] First tool data:', JSON.stringify(serverWithDefaults.tools[0], null, 2));
-} else {
-  console.log('[CARD DEBUG] No tools in ServerCard for', serverWithDefaults.name);
-}
-
-// Special debug force to verify if the tools property is accessible and properly typed
-try {
-  console.log('[CARD DEBUG] Tools array inspection for', serverWithDefaults.name, ':',
-    (serverWithDefaults.tools || []).map(t => t.name || 'unnamed').join(', ')
-  );
-} catch (e) {
-  console.error('[CARD DEBUG] Error accessing tools array:', e);
-}
-
-// Ensure tools are properly formatted objects with required properties
-serverWithDefaults.tools = serverWithDefaults.tools.filter(tool => {
-  if (!tool || typeof tool !== 'object') {
-    console.error('[CARD DEBUG] Filtering out invalid tool (not an object):', tool);
-    return false;
-  }
-  if (!tool.name || typeof tool.name !== 'string') {
-    console.error('[CARD DEBUG] Filtering out tool without valid name:', tool);
-    return false;
-  }
-  return true;
-});
-  const TypeIcon = serverType === ServerType.SSE ? Globe : Terminal;
+// Filter out invalid tools
+serverWithDefaults.tools = serverWithDefaults.tools.filter(tool =>
+  tool && typeof tool === 'object' && tool.name && typeof tool.name === 'string'
+);
+  // Choose icon based on server type
+  const TypeIcon = serverType === ServerType.SSE ? Globe :
+                   serverType === ServerType.STREAMABLE_HTTP ? Zap : Terminal;
   const toolsCount = serverWithDefaults.tools?.length || 0;
   const envVarsCount = server.env ? Object.keys(server.env).length : 0;
 
@@ -357,12 +320,9 @@ serverWithDefaults.tools = serverWithDefaults.tools.filter(tool => {
             <div className="animate-spin h-4 w-4 border-2 border-[var(--vscode-focusBorder)] rounded-full border-t-transparent"></div>
           </div>
         ) : (
-          <Switch 
+          <Switch
             checked={localEnabled}
-            onCheckedChange={(checked) => {
-              console.log(`[TOGGLE DEBUG] Switch onCheckedChange: ${checked}`);
-              handleToggleServer(checked);
-            }}
+            onCheckedChange={handleToggleServer}
             onClick={(e) => e.stopPropagation()}
             className={cn(
               "flex-shrink-0",
@@ -422,13 +382,17 @@ serverWithDefaults.tools = serverWithDefaults.tools.filter(tool => {
         <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 items-start text-sm">
           <span className="text-[var(--vscode-descriptionForeground)]">Type:</span>
           <div className="flex items-center">
-            <Badge 
-              variant="outline" 
+            <Badge
+              variant="outline"
               className="w-fit dark-steel-badge"
             >
               {serverType === ServerType.SSE ? (
                 <div className="flex items-center gap-1">
                   <Globe className="h-3 w-3" /> SSE
+                </div>
+              ) : serverType === ServerType.STREAMABLE_HTTP ? (
+                <div className="flex items-center gap-1">
+                  <Zap className="h-3 w-3" /> Streamable HTTP
                 </div>
               ) : (
                 <div className="flex items-center gap-1">
@@ -685,14 +649,10 @@ serverWithDefaults.tools = serverWithDefaults.tools.filter(tool => {
         )}
       >
         <CardHeader className="p-3 card-header">
-          <Collapsible 
+          <Collapsible
             open={isLocalExpanded}
             onOpenChange={(open: boolean) => {
-              console.log(`[ServerCard] ${server.name}: Local expansion state changing to ${open}`);
-              // Update local state
               setIsLocalExpanded(open);
-              // Notify parent component if callback is provided
-              console.log(`[ServerCard] ${server.name}: Notifying parent of expansion state change to ${open}`);
               if (onOpenChange) {
                 onOpenChange(open);
               }

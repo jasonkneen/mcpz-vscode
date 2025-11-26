@@ -106,13 +106,13 @@ export async function activate(context: vscode.ExtensionContext) {
             logger.log(`Installing dynamic tools ext for server`);
             
             // Skip invalid server configurations
-            if (!server.command && server.type !== ServerType.SSE) {
+            if (!server.command && server.type !== ServerType.SSE && server.type !== ServerType.STREAMABLE_HTTP) {
                 logger.warn(`Skipping server with missing command: ${JSON.stringify(server)}`);
                 continue;
             }
-            
-            if (server.type === ServerType.SSE && !server.url) {
-                logger.warn(`Skipping SSE server with missing URL: ${JSON.stringify(server)}`);
+
+            if ((server.type === ServerType.SSE || server.type === ServerType.STREAMABLE_HTTP) && !server.url) {
+                logger.warn(`Skipping ${server.type} server with missing URL: ${JSON.stringify(server)}`);
                 continue;
             }
             
@@ -123,6 +123,14 @@ export async function activate(context: vscode.ExtensionContext) {
             const allServerNames = servers.map(s => s.name ? s.name.trim() : 'unnamed-server');
             
             try {
+                // Determine the transport type based on server configuration
+                let transportType: 'stdio' | 'sse' | 'streamable-http' = 'stdio';
+                if (server.type === ServerType.SSE) {
+                    transportType = 'sse';
+                } else if (server.type === ServerType.STREAMABLE_HTTP) {
+                    transportType = 'streamable-http';
+                }
+
                 const client = await installDynamicToolsExt({
                     context,
                     serverName,
@@ -131,8 +139,9 @@ export async function activate(context: vscode.ExtensionContext) {
                     allServerNames,
                     command: server.command,
                     env: {...(server.env ?? {})},
-                    transport: server.type === ServerType.PROCESS ? 'stdio' : 'sse',
-                    url: server.type === ServerType.SSE ? server.url : undefined
+                    transport: transportType,
+                    url: (server.type === ServerType.SSE || server.type === ServerType.STREAMABLE_HTTP) ? server.url : undefined,
+                    authToken: server.authToken
                 });
                 
                 clients.push(client);

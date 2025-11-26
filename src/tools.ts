@@ -3,10 +3,11 @@ import fs from 'fs';
 import path from 'path';
 import { tmpdir } from 'os';
 import * as vscode from 'vscode';
-import { Tool } from '@modelcontextprotocol/sdk/types';
+import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { findActualExecutable, spawnPromise } from 'spawn-rx';
 import { McpProxyTool } from './tools/McpProxyTool';
@@ -24,8 +25,10 @@ export interface RegisterToolsParams {
     env?: {
         [key: string]: string;
     }
-    transport?: 'stdio' | 'sse';
+    transport?: 'stdio' | 'sse' | 'streamable-http';
     url?: string;
+    /** Authentication token for HTTP-based transports */
+    authToken?: string;
 }
 
 export const toolsExtTemplate = (serverName: string) => `mcpsx-${serverName}-tools-ext`;
@@ -116,19 +119,19 @@ export async function installDynamicToolsExt(params: RegisterToolsParams) {
     };
     
     let transport: Transport;
-    // 2. create a client and transport
+    // 2. create a client and transport based on the transport type
     if(params.transport === 'stdio' || !params.transport) {
         try {
             logger.log(`[DEBUG] Creating stdio transport`);
             transport = new StdioClientTransport(transportParams);
             transport.onclose = () => {
-                logger.warn(`Transport closed`);
+                logger.warn(`[Transport] Stdio transport closed for ${params.serverName}`);
             };
             transport.onerror = (e) => {
-                logger.warn(`Transport error: ${e}`);
+                logger.warn(`[Transport] Stdio transport error for ${params.serverName}: ${e}`);
             };
             transport.onmessage = (message) => {
-                logger.log(`Transport message: ${message}`);
+                logger.log(`[Transport] Stdio message from ${params.serverName}: ${JSON.stringify(message)}`);
             };
         } catch(e) {
             logger.warn(`Failed to create stdio transport: ${e}`);
@@ -139,7 +142,38 @@ export async function installDynamicToolsExt(params: RegisterToolsParams) {
             throw new Error('URL is required for SSE transport');
         }
         logger.log(`[DEBUG] Creating SSE transport with URL: ${params.url}`);
-        transport = new SSEClientTransport(new URL(params.url));
+        const sseUrl = new URL(params.url);
+        transport = new SSEClientTransport(sseUrl);
+        transport.onclose = () => {
+            logger.warn(`[Transport] SSE transport closed for ${params.serverName}`);
+        };
+        transport.onerror = (e) => {
+            logger.warn(`[Transport] SSE transport error for ${params.serverName}: ${e}`);
+        };
+    } else if(params.transport === 'streamable-http') {
+        if(!params.url) {
+            throw new Error('URL is required for Streamable HTTP transport');
+        }
+        logger.log(`[DEBUG] Creating Streamable HTTP transport with URL: ${params.url}`);
+        const httpUrl = new URL(params.url);
+
+        // Configure headers for authentication if provided
+        const headers: Record<string, string> = {};
+        if (params.authToken) {
+            headers['Authorization'] = `Bearer ${params.authToken}`;
+        }
+
+        transport = new StreamableHTTPClientTransport(httpUrl, {
+            requestInit: {
+                headers
+            }
+        });
+        transport.onclose = () => {
+            logger.warn(`[Transport] Streamable HTTP transport closed for ${params.serverName}`);
+        };
+        transport.onerror = (e) => {
+            logger.warn(`[Transport] Streamable HTTP transport error for ${params.serverName}: ${e}`);
+        };
     } else {
         logger.warn(`Unsupported transport: ${params.transport}`);
         throw new Error(`Unsupported transport: ${params.transport}`);
@@ -150,13 +184,11 @@ export async function installDynamicToolsExt(params: RegisterToolsParams) {
     const client = new Client(
         {
           name: params.serverName,
-          version: "0.0.1"  // Updated version number
+          version: "0.0.1"
         },
         {
           capabilities: {
-            prompts: true,
-            resources: true,
-            tools: true            
+            // Client capabilities structure for SDK 1.22.0
           }
         }
     );
@@ -179,11 +211,7 @@ export async function installDynamicToolsExt(params: RegisterToolsParams) {
                     version: "0.0.1"
                 },
                 {
-                    capabilities: {
-                        prompts: true,
-                        resources: true,
-                        tools: true                        
-                    }
+                    capabilities: {}
                 }
             );
         }
