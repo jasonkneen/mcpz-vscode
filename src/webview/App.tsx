@@ -80,212 +80,132 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
 
 const handleWebviewMessage = (event: MessageEvent) => {
   const message = event.data;
-  console.log(`[MCP Debug] Received message: ${message.type}`, message);
-  
+
   switch (message.type) {
     case 'setServers':
-      console.log('Setting servers:', message.servers);
-      // Log tools information for each server for debugging
-      if (Array.isArray(message.servers)) {
-        message.servers.forEach((server: any) => {
-          console.log(`[MCP Tools Debug] Server ${server.name} has ${server.tools?.length || 0} tools:`, 
-            Array.isArray(server.tools) ? server.tools.map((t: any) => t.name).join(', ') : 'none');
-        });
-      }
       return message.servers;
     
     case 'updateServer':
-      console.log(`[MCP Debug] Updating server: ${message.server.name || message.server.id}`);
-      // Preserve tools if they exist in the message, otherwise keep existing tools
       const toolsToUse = message.tools || message.server.tools;
-      
-      if (toolsToUse) {
-        console.log(`[MCP Tools Debug] Server update includes ${toolsToUse.length} tools`);
-      }
-      
-      return (current: ServerWithTools[]) => 
-        current.map(server => 
-          // Match by ID first if available, then by name
-          (message.server.id && server.id === message.server.id) || 
+      return (current: ServerWithTools[]) =>
+        current.map(server =>
+          (message.server.id && server.id === message.server.id) ||
             (!message.server.id && server.name === message.server.name)
-            ? { 
-                ...server, 
-                ...message.server, 
-                // Explicitly prioritize tools from the message
-                tools: toolsToUse || server.tools, 
-                // Only use running to update connection state
+            ? {
+                ...server,
+                ...message.server,
+                tools: toolsToUse || server.tools,
                 isConnected: message.running,
-                // Don't update enabled from running state, preserve configuration
-                enabled: message.server.enabled !== undefined ? message.server.enabled : server.enabled 
+                enabled: message.server.enabled !== undefined ? message.server.enabled : server.enabled
               }
             : server
         );
     
     case 'updateServerTools':
-      console.log(`[MCP Tools Debug] Received updateServerTools for server ID: ${message.id}, name: ${message.name}`);
-      console.log(`[MCP Tools Debug] Tools payload (${message.tools?.length || 0} tools):`, message.tools);
-      
-      // More thorough validation of tools data
-      let toolsToUpdate = [];
-      
+      // Validate tools data
+      let toolsToUpdate: any[] = [];
       if (Array.isArray(message.tools)) {
-        toolsToUpdate = message.tools.filter((tool: any) => {
-          if (!tool || typeof tool !== 'object') {
-            console.error(`[MCP Tools Error] Invalid tool (not an object):`, tool);
-            return false;
-          }
-          if (!tool.name || typeof tool.name !== 'string') {
-            console.error(`[MCP Tools Error] Tool missing name property:`, tool);
-            return false;
-          }
-          return true;
-        });
-        
-        if (toolsToUpdate.length !== message.tools.length) {
-          console.warn(`[MCP Tools Warning] Filtered out ${message.tools.length - toolsToUpdate.length} invalid tools`);
-        }
-      } else {
-        console.error(`[MCP Tools Error] Tools is not an array:`, message.tools);
+        toolsToUpdate = message.tools.filter((tool: any) =>
+          tool && typeof tool === 'object' && tool.name && typeof tool.name === 'string'
+        );
       }
-      
-      console.log(`[MCP Tools Debug] Processing ${toolsToUpdate.length} valid tools for server ID: ${message.id}, name: ${message.name}`);
-      
-      // Show notification if no tools were found when we expected them
+
+      // Show notification if no tools were found when expected
       if (toolsToUpdate.length === 0 && message.expectedTools) {
         toast.error("No tools available", {
           description: `Server ${message.name} reported 0 tools. This might indicate a configuration issue.`,
           icon: <AlertCircle className="h-4 w-4" />
         });
       }
-      
-      return (current: ServerWithTools[]) => {
-        const updatedServers = current.map(server => {
-          // Match by ID first if available, then by name
-          const isMatch = (message.id && server.id === message.id) || 
+
+      return (current: ServerWithTools[]) =>
+        current.map(server => {
+          const isMatch = (message.id && server.id === message.id) ||
                         (!message.id && server.name === message.name);
-          
-          console.log(`[MCP Tools Debug] Checking server ${server.name} (ID: ${server.id}) against message ID: ${message.id}, name: ${message.name} - match: ${isMatch}`);
-          
           if (isMatch) {
-            const updatedServer = { 
-              ...server, 
+            return {
+              ...server,
               tools: toolsToUpdate,
-              // Preserve enabled setting from server config, don't overwrite with connection state
               isConnected: message.isConnected !== undefined ? message.isConnected : server.isConnected,
             };
-            
-            console.log(`[MCP Tools Debug] Updated server ${server.name} (ID: ${server.id}) with ${toolsToUpdate.length} tools`);
-            return updatedServer;
           }
           return server;
         });
-        
-        return updatedServers;
-      };
     
     case 'serverAdded':
-      console.log('Server added:', message.server);
-      // Ensure tools array exists even if empty
       const serverWithTools = {
         ...message.server,
         tools: message.server.tools || []
       };
       return (current: ServerWithTools[]) => [...current, serverWithTools];
-    
+
     case 'serverRemoved':
-      console.log('Server removed:', message.id || message.name);
-      return (current: ServerWithTools[]) => 
-        current.filter(server => 
-          !(message.id && server.id === message.id) && 
+      return (current: ServerWithTools[]) =>
+        current.filter(server =>
+          !(message.id && server.id === message.id) &&
           !(!message.id && server.name === message.name)
         );
-    
+
     case 'serverUpdated':
-      console.log('Server updated:', message.server);
-      // Preserve tools when updating a server
       return (current: ServerWithTools[]) =>
         current.map(server => {
-          // Match by ID first if available, then by name
-          const isMatch = (message.server.id && server.id === message.server.id) || 
+          const isMatch = (message.server.id && server.id === message.server.id) ||
             (!message.server.id && server.name === message.server.name);
-          
           if (isMatch) {
-            return { 
-              ...server, 
+            return {
+              ...server,
               ...message.server,
-              // Preserve tools when updating other properties
               tools: message.server.tools || server.tools || []
             };
           }
           return server;
         });
-    
+
     case 'serverToggling':
-      console.log('Server toggling state:', message.id || message.name, message.toggling);
       return (current: ServerWithTools[]) =>
         current.map(server =>
-          // Match by ID first if available, then by name
-          (message.id && server.id === message.id) || 
+          (message.id && server.id === message.id) ||
             (!message.id && server.name === message.name)
             ? { ...server, isToggling: message.toggling }
             : server
         );
-    
+
     case 'serverToggled':
-      console.log('Server toggled:', message.id || message.name, message.enabled);
       return (current: ServerWithTools[]) =>
         current.map(server => {
-          // Match by ID first if available, then by name
-          const isMatch = (message.id && server.id === message.id) || 
+          const isMatch = (message.id && server.id === message.id) ||
             (!message.id && server.name === message.name);
-          
           if (isMatch) {
-            console.log(`[TOGGLE DEBUG] Updating server ${server.name} in UI: enabled=${message.enabled}, isConnected=${message.isConnected !== undefined ? message.isConnected : server.isConnected}`);
-            return { 
-              ...server, 
-              enabled: message.enabled, 
+            return {
+              ...server,
+              enabled: message.enabled,
               isToggling: false,
-              // Use the isConnected value from the message if provided, otherwise keep the current value
               isConnected: message.isConnected !== undefined ? message.isConnected : server.isConnected
             };
           }
           return server;
         });
-    
+
     case 'updateInstancesStatus':
-      console.log('Instances status update:', message.data);
-      // This is a special case - we just need to return the status data directly
       return { type: 'instancesStatus', data: message.data };
 
     case 'error':
-      // Handle error messages
-      console.error('Error from extension:', message.message);
-      console.log(`[ERROR DEBUG] Error details: serverId=${message.serverId}, message="${message.message}"`);
-      
       // Check if this is a connection error for a disabled server
-      // We don't want to show error toasts for servers that are intentionally disabled
-      if (message.serverId && message.message && 
-          (message.message.includes('connect') || message.message.includes('ping') || 
+      if (message.serverId && message.message &&
+          (message.message.includes('connect') || message.message.includes('ping') ||
            message.message.includes('unavailable'))) {
-        
-        // Find the server in the current state
-        const server = window.serverState?.find((s: any) => 
+        const server = window.serverState?.find((s: any) =>
           s.id === message.serverId || s.name === message.serverId);
-        
-        // If server exists and is disabled, don't show the error toast
         if (server && server.enabled === false) {
-          console.log(`[ERROR FILTER] Suppressing connection error toast for disabled server: ${server.name}`);
           return undefined;
         }
       }
-      
       toast.error("Error", {
         description: message.message || "An unknown error occurred"
       });
       return undefined;
-    
+
     default:
-      console.log('Unknown message type:', message.type, message);
       return undefined;
   }
 };
@@ -350,10 +270,6 @@ export function App() {
     }
   }, []);
 
-  // Log when expandedServerId changes
-  useEffect(() => {
-    console.log(`[App] Expanded server ID changed to: ${expandedServerId || 'none'}`);
-  }, [expandedServerId]);
 
 
   const resetForm = () => {
@@ -398,9 +314,9 @@ export function App() {
       setFormError('Command is required for process servers');
       return;
     }
-    
-    if (serverType === ServerType.SSE && !serverUrl.trim()) {
-      setFormError('URL is required for SSE servers');
+
+    if ((serverType === ServerType.SSE || serverType === ServerType.STREAMABLE_HTTP) && !serverUrl.trim()) {
+      setFormError('URL is required for HTTP-based servers');
       return;
     }
 
@@ -617,11 +533,7 @@ export function App() {
                       key={server.name}
                       server={server}
                       onOpenChange={(isOpen) => {
-                        // When a card is opened, set it as the expanded card
-                        console.log(`[App] Server ${server.name} expansion state changed to ${isOpen}`);
-                        // When a card is closed, clear the expanded card
-                        const newExpandedId = isOpen ? server.id : null;
-                        setExpandedServerId(newExpandedId);
+                        setExpandedServerId(isOpen ? server.id : null);
                       }}
                       isExpanded={expandedServerId === server.id}
                       onEdit={(serverToEdit) => {
@@ -722,7 +634,7 @@ export function App() {
               
               <div className="space-y-2">
                 <Label>Server Type</Label>
-                <div className="flex space-x-4">
+                <div className="flex flex-wrap gap-4">
                   <div className="flex items-center space-x-2">
                     <input
                       type="radio"
@@ -747,7 +659,24 @@ export function App() {
                     />
                     <Label htmlFor="type-sse" className="cursor-pointer">SSE</Label>
                   </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="radio"
+                      id="type-streamable-http"
+                      name="server-type"
+                      checked={serverType === ServerType.STREAMABLE_HTTP}
+                      onChange={() => setServerType(ServerType.STREAMABLE_HTTP)}
+                      className="accent-[var(--vscode-focusBorder)]"
+                      aria-label="Streamable HTTP server type"
+                    />
+                    <Label htmlFor="type-streamable-http" className="cursor-pointer">Streamable HTTP</Label>
+                  </div>
                 </div>
+                <p className="text-xs text-[var(--vscode-descriptionForeground)]">
+                  {serverType === ServerType.PROCESS && "stdio: Local process communication via standard input/output"}
+                  {serverType === ServerType.SSE && "SSE: Server-Sent Events for HTTP-based communication (legacy)"}
+                  {serverType === ServerType.STREAMABLE_HTTP && "Streamable HTTP: Modern HTTP transport with bidirectional streaming"}
+                </p>
               </div>
               
               {serverType === ServerType.PROCESS ? (
@@ -762,7 +691,7 @@ export function App() {
                       className="font-mono text-sm bg-[var(--vscode-input-background)] text-[var(--vscode-input-foreground)] border-[var(--vscode-input-border)]"
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <Label>Environment Variables</Label>
@@ -776,7 +705,7 @@ export function App() {
                         <Plus className="h-3 w-3 mr-1" /> Add Variable
                       </Button>
                     </div>
-                    
+
                     <div className="space-y-2 max-h-[200px] overflow-y-auto">
                       {envVars.map((envVar, index) => (
                         <div key={index} className="flex gap-2">
@@ -814,11 +743,18 @@ export function App() {
                       id="server-url"
                       value={serverUrl}
                       onChange={(e) => setServerUrl(e.target.value)}
-                      placeholder="https://your-mcp-server.example.com/events"
+                      placeholder={serverType === ServerType.SSE
+                        ? "https://your-mcp-server.example.com/sse"
+                        : "https://your-mcp-server.example.com/mcp"}
                       className="font-mono text-sm bg-[var(--vscode-input-background)] text-[var(--vscode-input-foreground)] border-[var(--vscode-input-border)]"
                     />
+                    <p className="text-xs text-[var(--vscode-descriptionForeground)]">
+                      {serverType === ServerType.SSE
+                        ? "The SSE endpoint URL (typically ends with /sse or /events)"
+                        : "The Streamable HTTP endpoint URL (typically ends with /mcp)"}
+                    </p>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="auth-token">Authentication Token (Optional)</Label>
                     <Input
@@ -829,6 +765,9 @@ export function App() {
                       placeholder="••••••••••••••••••••"
                       className="bg-[var(--vscode-input-background)] text-[var(--vscode-input-foreground)] border-[var(--vscode-input-border)]"
                     />
+                    <p className="text-xs text-[var(--vscode-descriptionForeground)]">
+                      Bearer token for authenticated MCP servers
+                    </p>
                   </div>
                 </>
               )}

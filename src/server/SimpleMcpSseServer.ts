@@ -54,10 +54,8 @@ export class SimpleMcpSseServer {
                 capabilities: {
                     tools: {},
                     resources: {
-                        list: true,
-                        templates: {
-                            list: true
-                        }
+                        subscribe: false,
+                        listChanged: false
                     }
                 },
             }

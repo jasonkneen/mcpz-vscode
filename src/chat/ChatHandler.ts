@@ -449,21 +449,14 @@ export class ChatHandler implements vscode.ChatFollowupProvider {
     
     for (const resource of resources) {
       markdown.appendMarkdown(`<strong>${resource.name}:</strong>`);
-      
+
       // Display appropriate resource info based on its type
-      if (resource.mimeType === 'text/plain' && resource.text) {
-        markdown.appendMarkdown(`<p>${resource.text}</p>`);
-      } else if (resource.mimeType === 'application/octet-stream' && resource.blob) {
-        try {
-          const text = Buffer.from(resource.blob as string, 'base64').toString('utf-8');
-          markdown.appendMarkdown(`<p>${text}</p>`);
-        } catch (error) {
-          markdown.appendMarkdown(`<p>Binary content (cannot display inline)</p>`);
-        }
+      if (resource.mimeType === 'text/plain' && 'text' in resource) {
+        markdown.appendMarkdown(`<p>${(resource as any).text}</p>`);
       } else {
         markdown.appendMarkdown(`<p>Type: ${resource.mimeType || 'unknown'}</p>`);
       }
-      
+
       markdown.appendMarkdown(`<p>URI: ${resource.uri}</p>`);
       markdown.appendMarkdown('<hr>');
     }

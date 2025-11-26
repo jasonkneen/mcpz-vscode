@@ -167,61 +167,25 @@ export class ServerViewProvider implements vscode.WebviewViewProvider {
         const servers = this._readServersFromFile();
         
         console.log('==== SERVER DEBUG INFO ====');
-        console.log('==== SERVER NAME MATCHING DEBUG ====');
-        console.log('Initializing client map from', this.clients.length, 'clients and', servers.length, 'server configs');
-        console.log('Available servers:', JSON.stringify(servers, null, 2));
-        console.log('Available clients:', this.clients.map(c => {
-            const version = c.getServerVersion();
-            console.log(`Client name: "${version?.name}", id: "${version?.id || 'none'}", version: "${version?.version || 'none'}"`);
-            console.log(`Client full version info:`, JSON.stringify(version, null, 2));
-            return {
-                id: version?.id,
-                name: version?.name,
-                version: version
-            };
-        }));
-        
+        // Initialize client map from clients and server configs
         // For each client, try to find its matching server config by name
         for (const client of this.clients) {
-            const clientName = client.getServerVersion()?.name;
-            const clientPackageId = client.getServerVersion()?.id; // Get the package ID from the server manifest
+            const serverVersion = client.getServerVersion();
+            const clientName = serverVersion?.name;
             if (!clientName) {
-                console.warn('Client has no name, skipping mapping');
                 continue;
             }
-            
+
             // Find the server config with matching name
             const normalizedClientName = this._normalizeServerName(clientName);
-            console.log(`Looking for server config matching normalized client name: "${normalizedClientName}" (original: "${clientName}")`);
-            console.log(`Client package ID: ${clientPackageId || 'not available'}`);
-            
-            // Log all server names and their normalized versions for comparison
-            servers.forEach(s => {
-                console.log(`Server config: "${s.name}", normalized: "${this._normalizeServerName(s.name)}"`);
-            });
-            
-            // First try to find by exact name match, then fall back to normalized name
-            // If client has a package ID, prioritize matching by that
-            let serverConfig = null;
-            if (clientPackageId) {
-                // Try to find a server with a matching package ID
-                serverConfig = servers.find(s => s.id === clientPackageId);
-                console.log(`Server match by package ID: ${!!serverConfig}`);
-            }
-            serverConfig = serverConfig || servers.find(s => s.name === clientName) || 
+
+            // Find server config by name matching
+            let serverConfig = servers.find(s => s.name === clientName) ||
                           servers.find(s => s.name === clientName + "-server") ||
                           servers.find(s => s.name === clientName.replace("-server", "")) ||
                           servers.find(s => this._normalizeServerName(s.name) === normalizedClientName);
-            
-            // Add debug logging for the matching process
-            if (serverConfig) {
-                console.log(`[SERVER MATCH DEBUG] Found server config for client "${clientName}":`, {
-                    matchedServerName: serverConfig.name,
-                    matchedServerId: serverConfig.id
-                });
-            }
+
             if (!serverConfig) {
-                console.warn(`No server config found for client: ${clientName} (normalized: ${normalizedClientName})`);
                 // Create a temporary UUID for this client - this will be used for server ID matching
                 const tempId = uuidv4();
                 console.log(`Creating temporary ID ${tempId} for client ${clientName}`);

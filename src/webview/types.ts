@@ -1,6 +1,7 @@
 export enum ServerType {
     PROCESS = 'process',
-    SSE = 'sse'
+    SSE = 'sse',
+    STREAMABLE_HTTP = 'streamable-http'
 }
 
 export interface ChatParticipant {
@@ -51,7 +52,7 @@ export interface ServerInstance {
     startTime: number;
     serverConfig: string;
     contextInfo: Record<string, any>;
-    connectionType: 'sse' | 'stdio';
+    connectionType: 'sse' | 'stdio' | 'streamable-http';
     lastHealthCheck?: number;
     status: 'running' | 'stopped' | 'error';
 }
